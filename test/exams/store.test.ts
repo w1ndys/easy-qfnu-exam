@@ -53,4 +53,27 @@ describe('exam dataset store', () => {
 
     await expect(readCurrentDataset(redis)).resolves.toEqual(written)
   })
+
+  it('writes unique version keys for uploads in the same millisecond', async () => {
+    const redis = new FakeRedis()
+    const now = new Date('2026-06-26T02:01:10.000Z')
+
+    const first = await writeDataset(redis, payload, now)
+    const second = await writeDataset(redis, payload, now)
+
+    expect(first.version).not.toBe(second.version)
+    expect(first.version).toMatch(/^20260626020110000-[a-f0-9]{8}$/)
+    expect(second.version).toMatch(/^20260626020110000-[a-f0-9]{8}$/)
+    expect(redis.writes).toContain(`exam:version:${first.version}`)
+    expect(redis.writes).toContain(`exam:version:${second.version}`)
+    expect(redis.values.get('exam:current')).toEqual(second)
+  })
+
+  it('returns null when current dataset is malformed', async () => {
+    const redis = new FakeRedis()
+
+    await redis.set('exam:current', { version: '20260626020110000-abcdef12', uploadedAt: 'bad', recordCount: 1 })
+
+    await expect(readCurrentDataset(redis)).resolves.toBeNull()
+  })
 })
