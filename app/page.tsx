@@ -151,6 +151,7 @@ export default function HomePage() {
               <p>第 {record.week} 周，星期 {record.weekday}，节次 {record.timeSlot}</p>
               <p>{record.startTime} - {record.endTime}</p>
               <p>{record.examStatus}</p>
+              {record.invigilator.trim() ? <p>监考人：{record.invigilator}</p> : null}
             </article>
           ))}
         </div>
