@@ -109,13 +109,19 @@ def upload_payload(upload_url, upload_secret, payload):
         "Authorization": f"Bearer {upload_secret}",
         "Content-Type": "application/json; charset=utf-8",
     }
-    resp = requests.post(upload_url, headers=headers, json=payload, timeout=60)
+    try:
+        resp = requests.post(upload_url, headers=headers, json=payload, timeout=60)
+    except requests.RequestException as e:
+        print(f"[!] 上传失败: {e}")
+        return False
+
+    body = resp.text[:500]
     if resp.status_code >= 400:
         print(f"[!] 上传失败: HTTP {resp.status_code}")
-        print(resp.text)
+        print(body)
         return False
     print(f"[+] 上传成功: HTTP {resp.status_code}")
-    print(resp.text)
+    print(body)
     return True
 
 
@@ -658,6 +664,12 @@ def crawl(args):
                     )
 
     writer.finalize()
+    if stats["fail"] > 0:
+        print(
+            f"[!] 存在 {stats['fail']} 个失败任务，跳过JSON输出和上传，避免发布不完整数据"
+        )
+        return 1
+
     payload = build_payload(args, writer.get_json_records())
 
     if args.json_output:
@@ -667,7 +679,7 @@ def crawl(args):
 
     if args.upload_url or args.upload:
         upload_url = args.upload_url or os.getenv("VERCEL_UPLOAD_URL")
-        upload_secret = args.upload_secret or os.getenv("VERCEL_UPLOAD_SECRET")
+        upload_secret = os.getenv("VERCEL_UPLOAD_SECRET")
         if not upload_url or not upload_secret:
             print("[!] 上传失败: 缺少 VERCEL_UPLOAD_URL 或 VERCEL_UPLOAD_SECRET")
             return 1
@@ -733,11 +745,6 @@ def main():
     )
     parser.add_argument(
         "--upload-url", default="", help="Vercel上传接口URL，默认读取VERCEL_UPLOAD_URL"
-    )
-    parser.add_argument(
-        "--upload-secret",
-        default="",
-        help="Vercel上传密钥，默认读取VERCEL_UPLOAD_SECRET",
     )
 
     args = parser.parse_args()
