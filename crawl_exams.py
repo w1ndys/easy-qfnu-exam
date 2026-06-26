@@ -701,13 +701,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  QFNU_JW_COOKIE="JSESSIONID=xxx" python crawl_exams.py
-  python crawl_exams.py -c "xxx" -s 2025-2026-2 --start-week 19 --end-week 20
-  python crawl_exams.py -c "xxx" -o exams.json -f json -w 20
-  python crawl_exams.py -c "xxx" -v -w 10
+  export QFNU_JW_COOKIE="JSESSIONID=xxx"
+  python crawl_exams.py --json-output exams.json
+  python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20
+  python crawl_exams.py --upload --json-output exams.json
         """,
     )
-    parser.add_argument("--cookie", "-c", default="", help="登录后的Cookie字符串")
+    parser.add_argument(
+        "--cookie",
+        "-c",
+        default="",
+        help="登录后的Cookie字符串 (不推荐命令行传入，优先使用环境变量)",
+    )
     parser.add_argument(
         "--cookie-env",
         default="QFNU_JW_COOKIE",
@@ -756,7 +761,7 @@ def main():
     if not args.cookie:
         args.cookie = os.getenv(args.cookie_env, "")
     if not args.cookie:
-        print("[!] 缺少Cookie，请使用 -c 或设置 QFNU_JW_COOKIE")
+        print("[!] 缺少Cookie，请设置 QFNU_JW_COOKIE，或手动使用 -c 传入")
         return 1
 
     print("=" * 60)

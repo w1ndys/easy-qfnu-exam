@@ -94,8 +94,36 @@ class CrawlUploadSafetyTest(unittest.TestCase):
             status = crawl_exams.main()
 
         self.assertEqual(1, status)
-        self.assertIn("[!] 缺少Cookie，请使用 -c 或设置 QFNU_JW_COOKIE", out.getvalue())
+        self.assertIn(
+            "[!] 缺少Cookie，请设置 QFNU_JW_COOKIE，或手动使用 -c 传入", out.getvalue()
+        )
         crawl.assert_not_called()
+
+    def test_help_recommends_cookie_env_examples(self):
+        out = io.StringIO()
+        with (
+            patch("sys.argv", ["crawl_exams.py", "--help"]),
+            self.assertRaises(SystemExit) as cm,
+            redirect_stdout(out),
+        ):
+            crawl_exams.main()
+
+        help_text = out.getvalue()
+        self.assertEqual(0, cm.exception.code)
+        self.assertIn('export QFNU_JW_COOKIE="JSESSIONID=xxx"', help_text)
+        self.assertIn("python crawl_exams.py --json-output exams.json", help_text)
+        self.assertIn(
+            "python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20",
+            help_text,
+        )
+        self.assertIn(
+            "python crawl_exams.py --upload --json-output exams.json", help_text
+        )
+        self.assertIn(
+            "登录后的Cookie字符串 (不推荐命令行传入，优先使用环境变量)",
+            help_text,
+        )
+        self.assertNotIn('-c "xxx"', help_text)
 
     def test_main_reads_cookie_from_default_env(self):
         with (
