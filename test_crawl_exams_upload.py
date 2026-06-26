@@ -83,6 +83,32 @@ class CrawlUploadSafetyTest(unittest.TestCase):
             self.assertFalse(os.path.exists(json_path))
             upload_payload.assert_not_called()
 
+    def test_main_returns_1_without_cookie_or_cookie_env(self):
+        out = io.StringIO()
+        with (
+            patch("sys.argv", ["crawl_exams.py"]),
+            patch.dict(os.environ, {}, clear=True),
+            patch("crawl_exams.crawl") as crawl,
+            redirect_stdout(out),
+        ):
+            status = crawl_exams.main()
+
+        self.assertEqual(1, status)
+        self.assertIn("[!] 缺少Cookie，请使用 -c 或设置 QFNU_JW_COOKIE", out.getvalue())
+        crawl.assert_not_called()
+
+    def test_main_reads_cookie_from_default_env(self):
+        with (
+            patch("sys.argv", ["crawl_exams.py"]),
+            patch.dict(os.environ, {"QFNU_JW_COOKIE": "JSESSIONID=env"}, clear=True),
+            patch("crawl_exams.crawl", return_value=0) as crawl,
+            redirect_stdout(io.StringIO()),
+        ):
+            status = crawl_exams.main()
+
+        self.assertEqual(0, status)
+        self.assertEqual("JSESSIONID=env", crawl.call_args.args[0].cookie)
+
 
 if __name__ == "__main__":
     unittest.main()

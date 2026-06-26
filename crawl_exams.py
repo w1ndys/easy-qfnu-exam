@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 考试安排爬取脚本 - 并发版
-使用方法: python crawl_exams.py --cookie "你的Cookie" [-w 5] [-o exams.csv]
+使用方法: QFNU_JW_COOKIE="你的Cookie" python crawl_exams.py [-w 5] [-o exams.csv]
 """
 
 import requests
@@ -701,13 +701,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python crawl_exams.py -c "JSESSIONID=xxx"
+  QFNU_JW_COOKIE="JSESSIONID=xxx" python crawl_exams.py
   python crawl_exams.py -c "xxx" -s 2025-2026-2 --start-week 19 --end-week 20
   python crawl_exams.py -c "xxx" -o exams.json -f json -w 20
   python crawl_exams.py -c "xxx" -v -w 10
         """,
     )
-    parser.add_argument("--cookie", "-c", required=True, help="登录后的Cookie字符串")
+    parser.add_argument("--cookie", "-c", default="", help="登录后的Cookie字符串")
+    parser.add_argument(
+        "--cookie-env",
+        default="QFNU_JW_COOKIE",
+        help="Cookie环境变量名 (默认: QFNU_JW_COOKIE)",
+    )
     parser.add_argument(
         "--semester", "-s", default="2025-2026-2", help="学年学期 (默认: 2025-2026-2)"
     )
@@ -748,6 +753,12 @@ def main():
     )
 
     args = parser.parse_args()
+    if not args.cookie:
+        args.cookie = os.getenv(args.cookie_env, "")
+    if not args.cookie:
+        print("[!] 缺少Cookie，请使用 -c 或设置 QFNU_JW_COOKIE")
+        return 1
+
     print("=" * 60)
     print("曲阜师范大学教务系统 - 考试安排爬取 (并发版)")
     print("=" * 60)
