@@ -77,10 +77,6 @@ export function parseUploadPayload(value: unknown): UploadPayload {
     throw new Error('records must be an array')
   }
 
-  if (input.records.length === 0) {
-    throw new Error('records must not be empty')
-  }
-
   return {
     source: input.source,
     semester: input.semester,

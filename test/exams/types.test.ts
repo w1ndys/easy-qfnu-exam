@@ -29,13 +29,23 @@ describe('parseUploadPayload', () => {
     expect(parsed.records[0].courseName).toBe('大学英语2（普通）')
   })
 
-  it('rejects empty records', () => {
-    expect(() => parseUploadPayload({
+  it('accepts empty records', () => {
+    const parsed = parseUploadPayload({
       source: 'local-cron',
       semester: '2025-2026-2',
       generatedAt: '2026-06-26T10:00:00+08:00',
       records: [],
-    })).toThrow('records must not be empty')
+    })
+
+    expect(parsed.records).toEqual([])
+  })
+
+  it('rejects missing records', () => {
+    expect(() => parseUploadPayload({
+      source: 'local-cron',
+      semester: '2025-2026-2',
+      generatedAt: '2026-06-26T10:00:00+08:00',
+    })).toThrow('records must be an array')
   })
 
   it('rejects records with missing fields', () => {

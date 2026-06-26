@@ -49,10 +49,10 @@ describe('POST /api/upload', () => {
     })
   }
 
-  function mockSuccessfulWrite() {
+  function mockSuccessfulWrite(recordCount = 1) {
     writeDatasetMock.mockResolvedValue({
       version: '20260626020110',
-      recordCount: 1,
+      recordCount,
       uploadedAt: '2026-06-26T02:01:10.000Z',
     })
   }
@@ -92,13 +92,16 @@ describe('POST /api/upload', () => {
     expect(response.status).toBe(400)
   })
 
-  it('rejects empty records payloads', async () => {
+  it('accepts empty records payloads', async () => {
     authorize()
+    mockSuccessfulWrite(0)
     const { POST } = await import('@/app/api/upload/route')
 
     const response = await POST(makeRequest(JSON.stringify({ ...validPayload, records: [] })))
+    const body = await response.json()
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(200)
+    expect(body.recordCount).toBe(0)
   })
 
   it('rejects content-length greater than one megabyte', async () => {

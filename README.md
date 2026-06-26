@@ -21,6 +21,8 @@ export VERCEL_UPLOAD_SECRET="your-secret"
 python3 crawl_exams.py --json-output exams.json --upload
 ```
 
+当本次爬取没有考试记录时，上传的空数据集会更新线上数据并清空当前可查询记录。
+
 `-c/--cookie` 可用于手动一次性指定教务 Cookie，但不推荐使用，因为命令行中的敏感信息可能出现在 shell 历史记录或进程列表中。
 
 ## 查询使用

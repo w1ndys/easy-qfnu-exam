@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 考试安排爬取脚本 - 并发版
-使用方法: QFNU_JW_COOKIE="你的Cookie" python crawl_exams.py [-w 5] [-o exams.csv]
+使用方法: 先设置 QFNU_JW_COOKIE 环境变量，再运行 python crawl_exams.py [-w 5] [-o exams.csv]
 """
 
 import requests
@@ -591,16 +591,8 @@ def crawl(args):
     )
     print(f"[*] 并发数: {args.workers}, 开始获取详情...")
 
-    if not exam_tasks:
-        print("[!] 没有找到考试安排")
-        return 0
-
     # 5. 并发获取详情 + 实时保存
     writer = ResultWriter(args.output, args.format)
-
-    # 设置全局速率限制
-    global _limiter
-    _limiter = RateLimiter(args.rate)
 
     stats = {
         "lock": threading.Lock(),
@@ -610,58 +602,65 @@ def crawl(args):
         "records": 0,  # 总记录数
     }
 
-    tasks = [
-        (i, len(exam_tasks), cinfo, gcell)
-        for i, (cinfo, gcell) in enumerate(exam_tasks, 1)
-    ]
+    if not exam_tasks:
+        print("[!] 没有找到考试安排，将同步空数据集")
+    else:
+        # 设置全局速率限制
+        global _limiter
+        _limiter = RateLimiter(args.rate)
 
-    # 线程本地 session
-    thread_local = threading.local()
+        tasks = [
+            (i, len(exam_tasks), cinfo, gcell)
+            for i, (cinfo, gcell) in enumerate(exam_tasks, 1)
+        ]
 
-    def get_thread_session():
-        if not hasattr(thread_local, "session"):
-            thread_local.session = make_session(args.cookie)
-        return thread_local.session
+        # 线程本地 session
+        thread_local = threading.local()
 
-    def task_wrapper(task):
-        session = get_thread_session()
-        return process_task(
-            task,
-            session,
-            xnxqh,
-            start_zc,
-            end_zc,
-            start_xq,
-            end_xq,
-            jszt,
-            kbjcmsid,
-            writer,
-            stats,
-            args.verbose,
-        )
+        def get_thread_session():
+            if not hasattr(thread_local, "session"):
+                thread_local.session = make_session(args.cookie)
+            return thread_local.session
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {executor.submit(task_wrapper, t): t for t in tasks}
+        def task_wrapper(task):
+            session = get_thread_session()
+            return process_task(
+                task,
+                session,
+                xnxqh,
+                start_zc,
+                end_zc,
+                start_xq,
+                end_xq,
+                jszt,
+                kbjcmsid,
+                writer,
+                stats,
+                args.verbose,
+            )
 
-        for f in as_completed(futures):
-            task = futures[f]
-            idx = task[0]
-            try:
-                f.result()
-            except Exception as e:
-                with stats["lock"]:
-                    stats["fail"] += 1
-                print(f"  [!] 任务 {idx} 异常: {e}")
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {executor.submit(task_wrapper, t): t for t in tasks}
 
-            if not args.verbose:
-                done = stats["ok"] + stats["empty"] + stats["fail"]
-                if done % 100 == 0 or done == len(exam_tasks):
-                    print(
-                        f"  进度: {done}/{len(exam_tasks)} "
-                        f"({done * 100 // len(exam_tasks)}%), "
-                        f"成功={stats['ok']}, 空={stats['empty']}, "
-                        f"失败={stats['fail']}, 记录={stats['records']}"
-                    )
+            for f in as_completed(futures):
+                task = futures[f]
+                idx = task[0]
+                try:
+                    f.result()
+                except Exception as e:
+                    with stats["lock"]:
+                        stats["fail"] += 1
+                    print(f"  [!] 任务 {idx} 异常: {e}")
+
+                if not args.verbose:
+                    done = stats["ok"] + stats["empty"] + stats["fail"]
+                    if done % 100 == 0 or done == len(exam_tasks):
+                        print(
+                            f"  进度: {done}/{len(exam_tasks)} "
+                            f"({done * 100 // len(exam_tasks)}%), "
+                            f"成功={stats['ok']}, 空={stats['empty']}, "
+                            f"失败={stats['fail']}, 记录={stats['records']}"
+                        )
 
     writer.finalize()
     if stats["fail"] > 0:

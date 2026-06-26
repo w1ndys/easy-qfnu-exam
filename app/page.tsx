@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import type { ExamRecord } from '@/lib/exams/types'
 
 type SearchMeta = {
@@ -30,6 +30,34 @@ export default function HomePage() {
   const [message, setMessage] = useState('请输入条件后查询')
   const [loading, setLoading] = useState(false)
   const latestRequestId = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadMeta() {
+      try {
+        const response = await fetch('/api/exams/search?limit=1')
+        if (!response.ok) return
+
+        const data = (await response.json()) as SearchResponse
+        if (cancelled) return
+
+        setMeta(data.meta)
+
+        if (latestRequestId.current === 0) {
+          setMessage(data.meta ? '请输入条件后查询' : '暂无同步数据')
+        }
+      } catch {
+        // Initial metadata is optional; submitted searches surface their own errors.
+      }
+    }
+
+    loadMeta()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
