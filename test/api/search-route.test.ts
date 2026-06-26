@@ -57,11 +57,22 @@ describe('GET /api/exams/search', () => {
     expect(response.status).toBe(400)
   })
 
-  it('rejects present empty week params', async () => {
+  it('treats empty filter params as missing', async () => {
+    readCurrentDatasetMock.mockResolvedValue(null)
     const { GET } = await import('@/app/api/exams/search/route')
-    const response = await GET(new NextRequest('http://localhost/api/exams/search?week='))
+    const response = await GET(new NextRequest('http://localhost/api/exams/search?week=&weekday=&timeSlot='))
+    const body = await response.json()
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(200)
+    expect(body).toEqual({ meta: null, results: [] })
+  })
+
+  it('accepts week values greater than 30', async () => {
+    readCurrentDatasetMock.mockResolvedValue(null)
+    const { GET } = await import('@/app/api/exams/search/route')
+    const response = await GET(new NextRequest('http://localhost/api/exams/search?week=31'))
+
+    expect(response.status).toBe(200)
   })
 
   it('rejects weekday params outside 1 through 7', async () => {
@@ -76,6 +87,23 @@ describe('GET /api/exams/search', () => {
     const response = await GET(new NextRequest('http://localhost/api/exams/search?limit=1e2'))
 
     expect(response.status).toBe(400)
+  })
+
+  it('uses the default limit when limit is empty', async () => {
+    readCurrentDatasetMock.mockResolvedValue({
+      ...dataset,
+      recordCount: 150,
+      records: Array.from({ length: 150 }, (_, index) => ({
+        ...record,
+        classroomId: String(index),
+      })),
+    })
+    const { GET } = await import('@/app/api/exams/search/route')
+    const response = await GET(new NextRequest('http://localhost/api/exams/search?limit='))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.results).toHaveLength(100)
   })
 
   it('rejects reversed timeSlot ranges', async () => {

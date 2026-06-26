@@ -6,7 +6,7 @@ import { jsonError } from '@/lib/http/errors'
 export const runtime = 'nodejs'
 
 function parsePositiveLimit(value: string | null) {
-  if (value === null) {
+  if (value === null || value === '') {
     return 100
   }
 
@@ -23,8 +23,8 @@ function parsePositiveLimit(value: string | null) {
   return Math.min(parsed, 500)
 }
 
-function assertNumericParam(value: string | null, name: string, min: number, max: number) {
-  if (value === null) {
+function assertNumericParam(value: string | null, name: string, min: number, max?: number) {
+  if (value === null || value === '') {
     return
   }
 
@@ -34,8 +34,8 @@ function assertNumericParam(value: string | null, name: string, min: number, max
 
   const parsed = Number(value)
 
-  if (parsed < min || parsed > max) {
-    throw new Error(`${name} must be between ${min} and ${max}`)
+  if (parsed < min || (max !== undefined && parsed > max)) {
+    throw new Error(max === undefined ? `${name} must be at least ${min}` : `${name} must be between ${min} and ${max}`)
   }
 }
 
@@ -64,10 +64,13 @@ function assertValidTimeSlot(value: string | null) {
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams
+  const week = params.get('week') || undefined
+  const weekday = params.get('weekday') || undefined
+  const timeSlot = params.get('timeSlot') || undefined
   let limit = 100
 
   try {
-    assertNumericParam(params.get('week'), 'week', 1, 30)
+    assertNumericParam(params.get('week'), 'week', 1)
     assertNumericParam(params.get('weekday'), 'weekday', 1, 7)
     assertValidTimeSlot(params.get('timeSlot'))
     limit = parsePositiveLimit(params.get('limit'))
@@ -85,9 +88,9 @@ export async function GET(request: NextRequest) {
     const results = searchRecords(dataset.records, {
       classroom: params.get('classroom') ?? undefined,
       course: params.get('course') ?? undefined,
-      week: params.get('week') ?? undefined,
-      weekday: params.get('weekday') ?? undefined,
-      timeSlot: params.get('timeSlot') ?? undefined,
+      week,
+      weekday,
+      timeSlot,
       limit,
     })
 
