@@ -6,22 +6,59 @@ import { jsonError } from '@/lib/http/errors'
 export const runtime = 'nodejs'
 
 function parsePositiveLimit(value: string | null) {
-  if (!value) {
+  if (value === null) {
     return 100
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new Error('limit must be a positive integer')
   }
 
   const parsed = Number(value)
 
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  if (parsed <= 0) {
     throw new Error('limit must be a positive integer')
   }
 
   return Math.min(parsed, 500)
 }
 
-function assertNumericParam(value: string | null, name: string) {
-  if (value && !/^\d+$/.test(value)) {
+function assertNumericParam(value: string | null, name: string, min: number, max: number) {
+  if (value === null) {
+    return
+  }
+
+  if (!/^\d+$/.test(value)) {
     throw new Error(`${name} must be numeric`)
+  }
+
+  const parsed = Number(value)
+
+  if (parsed < min || parsed > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`)
+  }
+}
+
+function assertValidTimeSlot(value: string | null) {
+  if (value === null || value === '') {
+    return
+  }
+
+  if (/^\d+$/.test(value) || /^\d+(,\d+)+$/.test(value)) {
+    return
+  }
+
+  const range = value.match(/^(\d+)-(\d+)$/)
+
+  if (!range) {
+    throw new Error('timeSlot is invalid')
+  }
+
+  const start = Number(range[1])
+  const end = Number(range[2])
+
+  if (start > end || end - start + 1 > 4) {
+    throw new Error('timeSlot is invalid')
   }
 }
 
@@ -30,8 +67,9 @@ export async function GET(request: NextRequest) {
   let limit = 100
 
   try {
-    assertNumericParam(params.get('week'), 'week')
-    assertNumericParam(params.get('weekday'), 'weekday')
+    assertNumericParam(params.get('week'), 'week', 1, 30)
+    assertNumericParam(params.get('weekday'), 'weekday', 1, 7)
+    assertValidTimeSlot(params.get('timeSlot'))
     limit = parsePositiveLimit(params.get('limit'))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'invalid query params', 400)
