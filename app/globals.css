@@ -17,3 +17,111 @@ input,
 select {
   font: inherit;
 }
+
+.page-shell {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.hero {
+  padding: 32px;
+  border-radius: 28px;
+  color: white;
+  background: linear-gradient(135deg, #174ea6, #6a4cff);
+  box-shadow: 0 20px 60px rgba(23, 78, 166, 0.24);
+}
+
+.hero h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(32px, 6vw, 56px);
+}
+
+.eyebrow {
+  margin: 0;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.status-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.status-card span {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.search-panel {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+  margin: 24px 0;
+  padding: 20px;
+  border-radius: 24px;
+  background: white;
+  box-shadow: 0 12px 40px rgba(23, 32, 51, 0.08);
+}
+
+.search-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.search-panel input,
+.search-panel select {
+  width: 100%;
+  border: 1px solid #d9dfec;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.search-panel button {
+  align-self: end;
+  border: 0;
+  border-radius: 14px;
+  padding: 13px 18px;
+  color: white;
+  background: #174ea6;
+  cursor: pointer;
+}
+
+.search-panel button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.message {
+  color: #5f6b85;
+}
+
+.result-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.result-card {
+  padding: 20px;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 10px 30px rgba(23, 32, 51, 0.06);
+}
+
+.result-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+@media (max-width: 900px) {
+  .search-panel {
+    grid-template-columns: 1fr;
+  }
+}
