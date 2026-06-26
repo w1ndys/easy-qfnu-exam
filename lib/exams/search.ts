@@ -22,6 +22,10 @@ function matchesTimeSlot(recordSlot: string, querySlot: string) {
     return true
   }
 
+  if ([...queryParts, ...recordParts].some((part) => !/^\d+$/.test(part))) {
+    return false
+  }
+
   return queryParts.every((part) => recordParts.includes(part))
 }
 

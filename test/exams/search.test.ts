@@ -52,11 +52,37 @@ describe('searchRecords', () => {
     expect(result[0].classroomName).toBe('JA101')
   })
 
+  it('filters by compact normalized time slot', () => {
+    const result = searchRecords(records, { timeSlot: '0102' })
+    expect(result).toHaveLength(1)
+    expect(result[0].classroomName).toBe('JA101')
+  })
+
+  it('filters by comma-separated normalized time slot', () => {
+    const result = searchRecords(records, { timeSlot: '1,2' })
+    expect(result).toHaveLength(1)
+    expect(result[0].classroomName).toBe('JA101')
+  })
+
   it('honors limit', () => {
     expect(searchRecords(records, { limit: 1 })).toHaveLength(1)
   })
 
   it('does not broaden results for invalid time slots', () => {
     expect(searchRecords(records, { timeSlot: '2-1' })).toHaveLength(0)
+  })
+
+  it('does not match invalid query time slots against malformed record slots', () => {
+    const malformedRecords: ExamRecord[] = [
+      ...records,
+      {
+        ...records[0],
+        classroomName: 'JA103',
+        classroomId: '2082',
+        timeSlot: '2-1',
+      },
+    ]
+
+    expect(searchRecords(malformedRecords, { timeSlot: '2-1' })).toHaveLength(0)
   })
 })
