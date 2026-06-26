@@ -1,0 +1,19 @@
+:root {
+  color: #172033;
+  background: #f6f8fc;
+  font-family: Arial, 'Microsoft YaHei', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
