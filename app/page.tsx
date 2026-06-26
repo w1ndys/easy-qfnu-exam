@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useRef, useState } from 'react'
 import type { ExamRecord } from '@/lib/exams/types'
 
 type SearchMeta = {
@@ -29,9 +29,13 @@ export default function HomePage() {
   const [results, setResults] = useState<ExamRecord[]>([])
   const [message, setMessage] = useState('请输入条件后查询')
   const [loading, setLoading] = useState(false)
+  const latestRequestId = useRef(0)
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const requestId = latestRequestId.current + 1
+    latestRequestId.current = requestId
+
     setLoading(true)
     setMessage('查询中...')
 
@@ -45,10 +49,30 @@ export default function HomePage() {
     try {
       const response = await fetch(`/api/exams/search?${params.toString()}`)
       if (!response.ok) {
+        if (response.status === 400) {
+          let error = '请检查查询条件'
+          try {
+            const data = (await response.json()) as { error?: unknown }
+            if (typeof data.error === 'string' && data.error.trim()) {
+              error = data.error
+            }
+          } catch {
+            // Fall back to a generic validation message when the API response is not JSON.
+          }
+
+          if (latestRequestId.current === requestId) {
+            setMessage(`查询条件有误：${error}`)
+            setResults([])
+          }
+          return
+        }
+
         throw new Error(await response.text())
       }
 
       const data = (await response.json()) as SearchResponse
+      if (latestRequestId.current !== requestId) return
+
       setMeta(data.meta)
       setResults(data.results)
 
@@ -60,10 +84,14 @@ export default function HomePage() {
         setMessage(`找到 ${data.results.length} 条记录`)
       }
     } catch {
+      if (latestRequestId.current !== requestId) return
+
       setMessage('查询失败，请稍后再试')
       setResults([])
     } finally {
-      setLoading(false)
+      if (latestRequestId.current === requestId) {
+        setLoading(false)
+      }
     }
   }
 
@@ -114,7 +142,7 @@ export default function HomePage() {
       </form>
 
       <section className="results-panel">
-        <p className="message">{message}</p>
+        <p className="message" role="status" aria-live="polite">{message}</p>
         <div className="result-list">
           {results.map((record, index) => (
             <article className="result-card" key={`${record.classroomId}-${record.weekInfo}-${record.courseName}-${index}`}>
