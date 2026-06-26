@@ -5,6 +5,7 @@
 """
 
 import requests
+import os
 import re
 import csv
 import json
@@ -12,10 +13,12 @@ import sys
 import time
 import argparse
 import threading
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 禁用警告
 import urllib3
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -35,17 +38,33 @@ HEADERS = {
 }
 
 FIELDNAMES = [
-    "classroom_name", "classroom_id", "exam_status",
-    "course_name", "exam_date", "week_info",
-    "weekday", "time_slot", "start_time", "end_time",
-    "invigilator", "week_range"
+    "classroom_name",
+    "classroom_id",
+    "exam_status",
+    "course_name",
+    "exam_date",
+    "week_info",
+    "weekday",
+    "time_slot",
+    "start_time",
+    "end_time",
+    "invigilator",
+    "week_range",
 ]
 
 FIELD_LABELS = [
-    "教室名称", "教室编号", "考试状态",
-    "课程名称", "考试时间", "周次-星期节次",
-    "星期", "节次", "开始时间", "结束时间",
-    "监考人", "周次"
+    "教室名称",
+    "教室编号",
+    "考试状态",
+    "课程名称",
+    "考试时间",
+    "周次-星期节次",
+    "星期",
+    "节次",
+    "开始时间",
+    "结束时间",
+    "监考人",
+    "周次",
 ]
 
 
@@ -68,6 +87,38 @@ class ExamRecord:
         return [getattr(self, fn, "") for fn in FIELDNAMES]
 
 
+def record_to_json(rec):
+    return {
+        "classroomName": rec.classroom_name,
+        "classroomId": rec.classroom_id,
+        "examStatus": rec.exam_status,
+        "courseName": rec.course_name,
+        "examTime": rec.exam_date,
+        "weekInfo": rec.week_info,
+        "weekday": rec.weekday,
+        "timeSlot": rec.time_slot,
+        "startTime": rec.start_time,
+        "endTime": rec.end_time,
+        "invigilator": rec.invigilator,
+        "week": rec.week_range,
+    }
+
+
+def upload_payload(upload_url, upload_secret, payload):
+    headers = {
+        "Authorization": f"Bearer {upload_secret}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    resp = requests.post(upload_url, headers=headers, json=payload, timeout=60)
+    if resp.status_code >= 400:
+        print(f"[!] 上传失败: HTTP {resp.status_code}")
+        print(resp.text)
+        return False
+    print(f"[+] 上传成功: HTTP {resp.status_code}")
+    print(resp.text)
+    return True
+
+
 class GridCell:
     def __init__(self):
         self.weekday = 0
@@ -86,11 +137,13 @@ class ClassroomInfo:
 
 class ResultWriter:
     """线程安全的结果写入器，支持实时保存"""
+
     def __init__(self, output_path, fmt="csv"):
         self.output_path = output_path
         self.fmt = fmt
         self.lock = threading.Lock()
         self.count = 0
+        self.json_records = []
         self._init_file()
 
     def _init_file(self):
@@ -107,6 +160,8 @@ class ResultWriter:
         if not records:
             return
         with self.lock:
+            for rec in records:
+                self.json_records.append(record_to_json(rec))
             if self.fmt == "csv":
                 with open(self.output_path, "a", newline="", encoding="utf-8-sig") as f:
                     writer = csv.writer(f)
@@ -118,7 +173,10 @@ class ResultWriter:
                     for i, rec in enumerate(records):
                         if self.count > 0 or i > 0:
                             f.write(",\n")
-                        row = {label: getattr(rec, fn, "") for fn, label in zip(FIELDNAMES, FIELD_LABELS)}
+                        row = {
+                            label: getattr(rec, fn, "")
+                            for fn, label in zip(FIELDNAMES, FIELD_LABELS)
+                        }
                         json.dump(row, f, ensure_ascii=False)
                         self.count += 1
 
@@ -131,11 +189,15 @@ class ResultWriter:
         with self.lock:
             return self.count
 
+    def get_json_records(self):
+        with self.lock:
+            return list(self.json_records)
+
 
 # 全局速率限制器
 class RateLimiter:
     def __init__(self, rate):
-        self.rate = rate          # 每秒请求数
+        self.rate = rate  # 每秒请求数
         self.lock = threading.Lock()
         self.last = 0
 
@@ -159,17 +221,16 @@ def make_session(cookie_str):
         session.headers["Cookie"] = cookie_str.strip()
     # 使用 HTTPAdapter 配置连接池
     adapter = requests.adapters.HTTPAdapter(
-        pool_connections=5,
-        pool_maxsize=5,
-        max_retries=0
+        pool_connections=5, pool_maxsize=5, max_retries=0
     )
-    session.mount('http://', adapter)
+    session.mount("http://", adapter)
     return session
 
 
 def is_login_page(html):
-    return ("登录" in html or "login" in html.lower()) and \
-           ("Form1" in html or "userAccount" in html or "password" in html.lower())
+    return ("登录" in html or "login" in html.lower()) and (
+        "Form1" in html or "userAccount" in html or "password" in html.lower()
+    )
 
 
 def get_kbjcmsid(session):
@@ -187,8 +248,10 @@ def get_kbjcmsid(session):
         print("[!] Cookie无效或已过期，服务器返回了登录页面")
         return None
 
-    for pattern in [r'name="kbjcmsid"[^>]*value="([^"]+)"',
-                    r'id="kbjcmsid"[^>]*value="([^"]+)"']:
+    for pattern in [
+        r'name="kbjcmsid"[^>]*value="([^"]+)"',
+        r'id="kbjcmsid"[^>]*value="([^"]+)"',
+    ]:
         match = re.search(pattern, html)
         if match:
             kbjcmsid = match.group(1)
@@ -203,15 +266,14 @@ def parse_grid_html(html):
     jc_cells = {}
     jc_pattern = re.findall(
         r'<td[^>]*id="jc(\d+)"[^>]*tdvalue="([^"]*)"[^>]*tdKssj="([^"]*)"[^>]*tdJssj="([^"]*)"[^>]*>',
-        html
+        html,
     )
     for jc_id, tdvalue, kssj, jssj in jc_pattern:
         jc_cells[int(jc_id)] = {"tdvalue": tdvalue, "kssj": kssj, "jssj": jssj}
     print(f"[+] 找到 {len(jc_cells)} 个时间槽定义")
 
     table_match = re.search(
-        r'<table[^>]*name="kbDataTable"[^>]*>(.*?)</table>',
-        html, re.DOTALL
+        r'<table[^>]*name="kbDataTable"[^>]*>(.*?)</table>', html, re.DOTALL
     )
     if not table_match:
         print("[!] 未找到教室数据表")
@@ -220,16 +282,18 @@ def parse_grid_html(html):
     table_html = table_match.group(1)
     classrooms = []
 
-    for tr_match in re.finditer(r'<tr[^>]*jsbh="([^"]+)"[^>]*>(.*?)</tr>', table_html, re.DOTALL):
+    for tr_match in re.finditer(
+        r'<tr[^>]*jsbh="([^"]+)"[^>]*>(.*?)</tr>', table_html, re.DOTALL
+    ):
         jsbh = tr_match.group(1)
         row_html = tr_match.group(2)
 
-        name_match = re.search(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
+        name_match = re.search(r"<td[^>]*>(.*?)</td>", row_html, re.DOTALL)
         if not name_match:
             continue
 
-        name_clean = re.sub(r'<[^>]+>', '', name_match.group(1)).strip()
-        name_clean = re.sub(r'\s+', '', name_clean)
+        name_clean = re.sub(r"<[^>]+>", "", name_match.group(1)).strip()
+        name_clean = re.sub(r"\s+", "", name_clean)
         if not name_clean:
             continue
 
@@ -238,11 +302,15 @@ def parse_grid_html(html):
         cinfo.name = name_clean
 
         for ci, cell_match in enumerate(
-            re.finditer(r'<td[^>]*ondblclick="clickTd\(this\)"[^>]*>(.*?)</td>', row_html, re.DOTALL)
+            re.finditer(
+                r'<td[^>]*ondblclick="clickTd\(this\)"[^>]*>(.*?)</td>',
+                row_html,
+                re.DOTALL,
+            )
         ):
             cell_content = cell_match.group(1)
             gcell = GridCell()
-            gcell.has_exam = 'font color' in cell_content or '考试' in cell_content
+            gcell.has_exam = "font color" in cell_content or "考试" in cell_content
             gcell.weekday = ci // 5 + 1
             jc_id = ci
             if jc_id in jc_cells:
@@ -259,10 +327,12 @@ def parse_grid_html(html):
 
 def _extract_field(html, label):
     """提取表格中的字段值：标签在第一个td，值在第三个td"""
-    pattern = re.escape(label) + r'\s*</td>\s*<td[^>]*>\s*</td>\s*<td[^>]*>\s*(.*?)\s*</td>'
+    pattern = (
+        re.escape(label) + r"\s*</td>\s*<td[^>]*>\s*</td>\s*<td[^>]*>\s*(.*?)\s*</td>"
+    )
     m = re.search(pattern, html, re.DOTALL)
     if m:
-        return re.sub(r'<[^>]+>', '', m.group(1)).strip()
+        return re.sub(r"<[^>]+>", "", m.group(1)).strip()
     return ""
 
 
@@ -274,11 +344,11 @@ def parse_detail_html(html, cinfo, gcell):
 
     # 每个考试记录以"教室状态："开头，提取每个记录块
     # 用教室状态作为锚点分割
-    blocks = re.split(r'(教室状态：)', html)
+    blocks = re.split(r"(教室状态：)", html)
 
     for i in range(1, len(blocks) - 1, 2):
-        label = blocks[i]          # "教室状态："
-        chunk = blocks[i + 1]      # 后续内容直到下一个"教室状态："或结束
+        label = blocks[i]  # "教室状态："
+        chunk = blocks[i + 1]  # 后续内容直到下一个"教室状态："或结束
         block = label + chunk
 
         # 找到这个block的结束位置（下一个</table>之后的</table>，即外层table结束）
@@ -299,7 +369,7 @@ def parse_detail_html(html, cinfo, gcell):
         rec.end_time = gcell.jssj
 
         if rec.week_info:
-            week_match = re.match(r'(\d+)-', rec.week_info)
+            week_match = re.match(r"(\d+)-", rec.week_info)
             if week_match:
                 rec.week_range = week_match.group(1)
 
@@ -309,18 +379,42 @@ def parse_detail_html(html, cinfo, gcell):
     return records
 
 
-def fetch_detail(session, jsbh, kcsj, xnxqh, start_zc, end_zc,
-                 start_xq, end_xq, jszt, kbjcmsid, xq, kssj, jssj, retries=2):
+def fetch_detail(
+    session,
+    jsbh,
+    kcsj,
+    xnxqh,
+    start_zc,
+    end_zc,
+    start_xq,
+    end_xq,
+    jszt,
+    kbjcmsid,
+    xq,
+    kssj,
+    jssj,
+    retries=2,
+):
     """获取详情页，支持重试和速率限制"""
     global _limiter
     params = {
-        "xnxqh": xnxqh, "jsbh": jsbh, "kcsj": kcsj,
-        "typewhere": "jszq", "startZc": start_zc, "endZc": end_zc,
-        "startJc": "", "endJc": "",
-        "startXq": start_xq, "endXq": end_xq, "jszt": jszt,
-        "type": "add", "kbjcmsid": kbjcmsid,
-        "xq": xq, "kssj": kssj, "jssj": jssj,
-        "tktime": str(int(time.time() * 1000))
+        "xnxqh": xnxqh,
+        "jsbh": jsbh,
+        "kcsj": kcsj,
+        "typewhere": "jszq",
+        "startZc": start_zc,
+        "endZc": end_zc,
+        "startJc": "",
+        "endJc": "",
+        "startXq": start_xq,
+        "endXq": end_xq,
+        "jszt": jszt,
+        "type": "add",
+        "kbjcmsid": kbjcmsid,
+        "xq": xq,
+        "kssj": kssj,
+        "jssj": jssj,
+        "tktime": str(int(time.time() * 1000)),
     }
     for attempt in range(retries + 1):
         if _limiter:
@@ -337,16 +431,40 @@ def fetch_detail(session, jsbh, kcsj, xnxqh, start_zc, end_zc,
     return 0, ""
 
 
-def process_task(task, session, xnxqh, start_zc, end_zc,
-                 start_xq, end_xq, jszt, kbjcmsid, writer, stats, verbose):
+def process_task(
+    task,
+    session,
+    xnxqh,
+    start_zc,
+    end_zc,
+    start_xq,
+    end_xq,
+    jszt,
+    kbjcmsid,
+    writer,
+    stats,
+    verbose,
+):
     """处理单个考试单元格的任务，返回 (cell_index, records_count, status_code, error)"""
     idx, total, cinfo, gcell = task
     kcsj = str(gcell.weekday) + gcell.tdvalue
     xq = gcell.weekday
 
-    status, html = fetch_detail(session, cinfo.jsbh, kcsj, xnxqh,
-                                start_zc, end_zc, start_xq, end_xq, jszt,
-                                kbjcmsid, xq, gcell.kssj, gcell.jssj)
+    status, html = fetch_detail(
+        session,
+        cinfo.jsbh,
+        kcsj,
+        xnxqh,
+        start_zc,
+        end_zc,
+        start_xq,
+        end_xq,
+        jszt,
+        kbjcmsid,
+        xq,
+        gcell.kssj,
+        gcell.jssj,
+    )
 
     if status == 200:
         records = parse_detail_html(html, cinfo, gcell)
@@ -357,24 +475,39 @@ def process_task(task, session, xnxqh, start_zc, end_zc,
                 stats["records"] += len(records)
             if verbose:
                 for r in records:
-                    print(f"  [{stats['records']}] {r.course_name or '?'} | "
-                          f"{r.exam_date or r.week_info} | {r.classroom_name or cinfo.name}")
+                    print(
+                        f"  [{stats['records']}] {r.course_name or '?'} | "
+                        f"{r.exam_date or r.week_info} | {r.classroom_name or cinfo.name}"
+                    )
             return idx, len(records), 200, ""
         else:
             with stats["lock"]:
                 stats["empty"] += 1
             if verbose:
-                print(f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
-                      f"{gcell.kssj}-{gcell.jssj} -> 无记录")
+                print(
+                    f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+                    f"{gcell.kssj}-{gcell.jssj} -> 无记录"
+                )
             return idx, 0, 200, "empty"
     else:
         with stats["lock"]:
             stats["fail"] += 1
         err_msg = html if isinstance(html, str) else str(status)
         if verbose:
-            print(f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
-                  f"{gcell.kssj}-{gcell.jssj} -> HTTP {status} {err_msg[:80]}")
+            print(
+                f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+                f"{gcell.kssj}-{gcell.jssj} -> HTTP {status} {err_msg[:80]}"
+            )
         return idx, 0, status, err_msg
+
+
+def build_payload(args, records):
+    return {
+        "source": "local-cron",
+        "semester": args.semester,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "records": records,
+    }
 
 
 def crawl(args):
@@ -386,37 +519,57 @@ def crawl(args):
     kbjcmsid = get_kbjcmsid(session)
     if kbjcmsid is None:
         print("[!] Cookie无效，无法继续")
-        return
+        return 1
 
     # 2. POST查询教室状态
     print(f"[*] 正在查询教室状态 (第{start_zc}-{end_zc}周)...")
     post_data = {
-        "typewhere": "jszq", "xnxqh": xnxqh,
-        "gnq_mh": "", "jsmc_mh": "", "syjs0601id": "",
-        "xqbh": "", "jxqbh": "", "jslx": "", "jxlbh": "",
-        "jsbh": "", "bjfh": "%3D", "rnrs": "", "jszt": jszt,
-        "zc": start_zc, "zc2": end_zc,
-        "xq": "", "xq2": "", "jc": "", "jc2": "",
-        "kbjcmsid": kbjcmsid, "ssdw": ""
+        "typewhere": "jszq",
+        "xnxqh": xnxqh,
+        "gnq_mh": "",
+        "jsmc_mh": "",
+        "syjs0601id": "",
+        "xqbh": "",
+        "jxqbh": "",
+        "jslx": "",
+        "jxlbh": "",
+        "jsbh": "",
+        "bjfh": "%3D",
+        "rnrs": "",
+        "jszt": jszt,
+        "zc": start_zc,
+        "zc2": end_zc,
+        "xq": "",
+        "xq2": "",
+        "jc": "",
+        "jc2": "",
+        "kbjcmsid": kbjcmsid,
+        "ssdw": "",
     }
 
-    resp = session.post(QUERY_URL, data=post_data,
-                        headers={"Content-Type": "application/x-www-form-urlencoded",
-                                 "Referer": QUERY_FORM_URL, "Origin": BASE_URL},
-                        timeout=60)
+    resp = session.post(
+        QUERY_URL,
+        data=post_data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": QUERY_FORM_URL,
+            "Origin": BASE_URL,
+        },
+        timeout=60,
+    )
     resp.encoding = "utf-8"
     grid_html = resp.text
     print(f"[+] 查询响应: {len(grid_html)} bytes")
 
     if is_login_page(grid_html):
         print("[!] Cookie无效，服务器返回了登录页面")
-        return
+        return 1
 
     # 3. 解析教室网格
     classrooms, jc_cells = parse_grid_html(grid_html)
     if not classrooms:
         print("[!] 未找到教室数据")
-        return
+        return 1
 
     # 4. 收集所有考试单元格
     exam_tasks = []
@@ -426,13 +579,15 @@ def crawl(args):
                 exam_tasks.append((cinfo, gcell))
 
     total_cells = sum(len(c.cells) for c in classrooms)
-    print(f"[+] {len(classrooms)} 教室, {total_cells} 时间槽, "
-          f"{len(exam_tasks)} 个考试标记")
+    print(
+        f"[+] {len(classrooms)} 教室, {total_cells} 时间槽, "
+        f"{len(exam_tasks)} 个考试标记"
+    )
     print(f"[*] 并发数: {args.workers}, 开始获取详情...")
 
     if not exam_tasks:
         print("[!] 没有找到考试安排")
-        return
+        return 0
 
     # 5. 并发获取详情 + 实时保存
     writer = ResultWriter(args.output, args.format)
@@ -443,14 +598,16 @@ def crawl(args):
 
     stats = {
         "lock": threading.Lock(),
-        "ok": 0,       # 有记录的单元格
-        "empty": 0,    # 有考试标记但详情无记录
-        "fail": 0,     # HTTP请求失败
+        "ok": 0,  # 有记录的单元格
+        "empty": 0,  # 有考试标记但详情无记录
+        "fail": 0,  # HTTP请求失败
         "records": 0,  # 总记录数
     }
 
-    tasks = [(i, len(exam_tasks), cinfo, gcell)
-             for i, (cinfo, gcell) in enumerate(exam_tasks, 1)]
+    tasks = [
+        (i, len(exam_tasks), cinfo, gcell)
+        for i, (cinfo, gcell) in enumerate(exam_tasks, 1)
+    ]
 
     # 线程本地 session
     thread_local = threading.local()
@@ -462,9 +619,20 @@ def crawl(args):
 
     def task_wrapper(task):
         session = get_thread_session()
-        return process_task(task, session, xnxqh, start_zc, end_zc,
-                            start_xq, end_xq, jszt, kbjcmsid,
-                            writer, stats, args.verbose)
+        return process_task(
+            task,
+            session,
+            xnxqh,
+            start_zc,
+            end_zc,
+            start_xq,
+            end_xq,
+            jszt,
+            kbjcmsid,
+            writer,
+            stats,
+            args.verbose,
+        )
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {executor.submit(task_wrapper, t): t for t in tasks}
@@ -482,16 +650,37 @@ def crawl(args):
             if not args.verbose:
                 done = stats["ok"] + stats["empty"] + stats["fail"]
                 if done % 100 == 0 or done == len(exam_tasks):
-                    print(f"  进度: {done}/{len(exam_tasks)} "
-                          f"({done*100//len(exam_tasks)}%), "
-                          f"成功={stats['ok']}, 空={stats['empty']}, "
-                          f"失败={stats['fail']}, 记录={stats['records']}")
+                    print(
+                        f"  进度: {done}/{len(exam_tasks)} "
+                        f"({done * 100 // len(exam_tasks)}%), "
+                        f"成功={stats['ok']}, 空={stats['empty']}, "
+                        f"失败={stats['fail']}, 记录={stats['records']}"
+                    )
 
     writer.finalize()
-    print(f"\n[+] 完成! 单元格: {stats['ok']}+{stats['empty']}+{stats['fail']} "
-          f"(有记录+空+失败) = {len(exam_tasks)}")
+    payload = build_payload(args, writer.get_json_records())
+
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"[+] JSON结果已保存到: {args.json_output}")
+
+    if args.upload_url or args.upload:
+        upload_url = args.upload_url or os.getenv("VERCEL_UPLOAD_URL")
+        upload_secret = args.upload_secret or os.getenv("VERCEL_UPLOAD_SECRET")
+        if not upload_url or not upload_secret:
+            print("[!] 上传失败: 缺少 VERCEL_UPLOAD_URL 或 VERCEL_UPLOAD_SECRET")
+            return 1
+        if not upload_payload(upload_url, upload_secret, payload):
+            return 1
+
+    print(
+        f"\n[+] 完成! 单元格: {stats['ok']}+{stats['empty']}+{stats['fail']} "
+        f"(有记录+空+失败) = {len(exam_tasks)}"
+    )
     print(f"[+] 共爬取 {stats['records']} 条考试记录")
     print(f"[+] 结果已保存到: {args.output}")
+    return 0
 
 
 def main():
@@ -504,43 +693,65 @@ def main():
   python crawl_exams.py -c "xxx" -s 2025-2026-2 --start-week 19 --end-week 20
   python crawl_exams.py -c "xxx" -o exams.json -f json -w 20
   python crawl_exams.py -c "xxx" -v -w 10
-        """
+        """,
     )
-    parser.add_argument("--cookie", "-c", required=True,
-                        help="登录后的Cookie字符串")
-    parser.add_argument("--semester", "-s", default="2025-2026-2",
-                        help="学年学期 (默认: 2025-2026-2)")
-    parser.add_argument("--start-week", type=str, default="19",
-                        help="开始周次 (默认: 19)")
-    parser.add_argument("--end-week", type=str, default="20",
-                        help="结束周次 (默认: 20)")
-    parser.add_argument("--start-xq", type=str, default="1",
-                        help="开始星期 (默认: 1)")
-    parser.add_argument("--end-xq", type=str, default="7",
-                        help="结束星期 (默认: 7)")
-    parser.add_argument("--jszt", type=str, default="4",
-                        help="教室状态类型 (默认: 4=考试)")
-    parser.add_argument("--output", "-o", default="exams.csv",
-                        help="输出文件路径 (默认: exams.csv)")
-    parser.add_argument("--format", "-f", choices=["csv", "json", "text"],
-                        default="csv", help="输出格式 (默认: csv)")
-    parser.add_argument("--workers", "-w", type=int, default=5,
-                        help="并发线程数 (默认: 5, 建议 3-10)")
-    parser.add_argument("--rate", "-r", type=float, default=10.0,
-                        help="每秒最大请求数 (默认: 10)")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="显示每条记录详情")
+    parser.add_argument("--cookie", "-c", required=True, help="登录后的Cookie字符串")
+    parser.add_argument(
+        "--semester", "-s", default="2025-2026-2", help="学年学期 (默认: 2025-2026-2)"
+    )
+    parser.add_argument(
+        "--start-week", type=str, default="19", help="开始周次 (默认: 19)"
+    )
+    parser.add_argument(
+        "--end-week", type=str, default="20", help="结束周次 (默认: 20)"
+    )
+    parser.add_argument("--start-xq", type=str, default="1", help="开始星期 (默认: 1)")
+    parser.add_argument("--end-xq", type=str, default="7", help="结束星期 (默认: 7)")
+    parser.add_argument(
+        "--jszt", type=str, default="4", help="教室状态类型 (默认: 4=考试)"
+    )
+    parser.add_argument(
+        "--output", "-o", default="exams.csv", help="输出文件路径 (默认: exams.csv)"
+    )
+    parser.add_argument(
+        "--format",
+        "-f",
+        choices=["csv", "json", "text"],
+        default="csv",
+        help="输出格式 (默认: csv)",
+    )
+    parser.add_argument(
+        "--workers", "-w", type=int, default=5, help="并发线程数 (默认: 5, 建议 3-10)"
+    )
+    parser.add_argument(
+        "--rate", "-r", type=float, default=10.0, help="每秒最大请求数 (默认: 10)"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="显示每条记录详情")
+    parser.add_argument("--json-output", default="", help="输出JSON上传载荷路径 (可选)")
+    parser.add_argument(
+        "--upload", action="store_true", help="爬取完成后上传到Vercel接口"
+    )
+    parser.add_argument(
+        "--upload-url", default="", help="Vercel上传接口URL，默认读取VERCEL_UPLOAD_URL"
+    )
+    parser.add_argument(
+        "--upload-secret",
+        default="",
+        help="Vercel上传密钥，默认读取VERCEL_UPLOAD_SECRET",
+    )
 
     args = parser.parse_args()
     print("=" * 60)
     print("曲阜师范大学教务系统 - 考试安排爬取 (并发版)")
     print("=" * 60)
     print(f"学期: {args.semester}, 周次: {args.start_week}-{args.end_week}")
-    print(f"并发: {args.workers} 线程, 速率: {args.rate} req/s, 输出: {args.output} ({args.format})")
+    print(
+        f"并发: {args.workers} 线程, 速率: {args.rate} req/s, 输出: {args.output} ({args.format})"
+    )
     print()
 
-    crawl(args)
+    return crawl(args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
