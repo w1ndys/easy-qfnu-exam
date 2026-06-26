@@ -17,4 +17,16 @@ describe('normalizeTimeSlot', () => {
   it('normalizes mixed whitespace', () => {
     expect(normalizeTimeSlot(' 03, 04 ')).toEqual(['3', '4'])
   })
+
+  it('returns no slots for blank input', () => {
+    expect(normalizeTimeSlot('   ')).toEqual([])
+  })
+
+  it('normalizes invalid nonblank expressions to a non-matching marker', () => {
+    expect(normalizeTimeSlot('2-1')).toEqual(['__invalid_time_slot__'])
+    expect(normalizeTimeSlot('1-')).toEqual(['__invalid_time_slot__'])
+    expect(normalizeTimeSlot('1-2-3')).toEqual(['__invalid_time_slot__'])
+    expect(normalizeTimeSlot('1,,2')).toEqual(['__invalid_time_slot__'])
+    expect(normalizeTimeSlot('1,a')).toEqual(['__invalid_time_slot__'])
+  })
 })
