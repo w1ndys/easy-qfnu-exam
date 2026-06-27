@@ -45,6 +45,8 @@ LOGIN_SUCCESS = "success"
 LOGIN_BAD_CAPTCHA = "bad_captcha"
 LOGIN_BAD_CREDENTIALS = "bad_credentials"
 LOGIN_UNKNOWN_ERROR = "unknown_error"
+MAX_CAPTCHA_RETRIES = 3
+LOGIN_VERIFY_MAX_RETRIES = 2
 
 FIELDNAMES = [
     "classroom_name",
@@ -234,6 +236,53 @@ def verify_login(session):
         return False
 
     return "教学一体化服务平台" in resp.text or "glyphicon-class" in resp.text
+
+
+def login(session, username, password):
+    print("[*] 正在初始化教务系统会话...")
+    try:
+        init_resp = session.get(BASE_URL, timeout=30)
+        if init_resp.status_code >= 400:
+            print(f"[!] 初始化会话失败: HTTP {init_resp.status_code}")
+            return False
+    except requests.RequestException as e:
+        print(f"[!] 初始化会话失败: {e}")
+        return False
+
+    for attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
+        print(f"[*] 正在登录教务系统 (验证码尝试 {attempt}/{MAX_CAPTCHA_RETRIES})...")
+        image = fetch_captcha(session)
+        if not image:
+            continue
+
+        captcha = solve_captcha(image)
+        if not captcha:
+            continue
+
+        scode, sxh = fetch_login_sess(session)
+        if not scode or not sxh:
+            continue
+
+        result = submit_login(session, username, password, captcha, scode, sxh)
+        if result == LOGIN_BAD_CREDENTIALS:
+            print("[!] 教务账号或密码错误")
+            return False
+        if result == LOGIN_BAD_CAPTCHA:
+            print("[!] 验证码错误，准备重试")
+            continue
+        if result != LOGIN_SUCCESS:
+            continue
+
+        for verify_attempt in range(1, LOGIN_VERIFY_MAX_RETRIES + 1):
+            if verify_login(session):
+                print("[+] 教务系统登录成功")
+                return True
+            print(f"[!] 登录状态验证失败 ({verify_attempt}/{LOGIN_VERIFY_MAX_RETRIES})")
+            time.sleep(1)
+        return False
+
+    print("[!] 登录失败: 验证码重试次数已用尽")
+    return False
 
 
 def upload_payload(upload_url, upload_secret, payload):

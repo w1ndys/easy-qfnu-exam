@@ -303,6 +303,60 @@ class CrawlUploadSafetyTest(unittest.TestCase):
 
         self.assertFalse(crawl_exams.verify_login(session))
 
+    def test_login_retries_after_bad_captcha_and_then_succeeds(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200)
+
+        with (
+            patch("crawl_exams.fetch_captcha", side_effect=[b"img1", b"img2"]),
+            patch("crawl_exams.solve_captcha", side_effect=["1111", "2222"]),
+            patch("crawl_exams.fetch_login_sess", return_value=("scode", "11111")),
+            patch(
+                "crawl_exams.submit_login",
+                side_effect=[crawl_exams.LOGIN_BAD_CAPTCHA, crawl_exams.LOGIN_SUCCESS],
+            ) as submit_login,
+            patch("crawl_exams.verify_login", return_value=True),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertTrue(crawl_exams.login(session, "user", "pass"))
+
+        self.assertEqual(2, submit_login.call_count)
+
+    def test_login_stops_immediately_on_bad_credentials(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200)
+
+        with (
+            patch("crawl_exams.fetch_captcha", return_value=b"img"),
+            patch("crawl_exams.solve_captcha", return_value="1111"),
+            patch("crawl_exams.fetch_login_sess", return_value=("scode", "11111")),
+            patch(
+                "crawl_exams.submit_login", return_value=crawl_exams.LOGIN_BAD_CREDENTIALS
+            ) as submit_login,
+            patch("crawl_exams.verify_login") as verify_login,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertFalse(crawl_exams.login(session, "user", "bad-pass"))
+
+        self.assertEqual(1, submit_login.call_count)
+        verify_login.assert_not_called()
+
+    def test_login_fails_when_verification_never_passes(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200)
+
+        with (
+            patch("crawl_exams.fetch_captcha", return_value=b"img"),
+            patch("crawl_exams.solve_captcha", return_value="1111"),
+            patch("crawl_exams.fetch_login_sess", return_value=("scode", "11111")),
+            patch("crawl_exams.submit_login", return_value=crawl_exams.LOGIN_SUCCESS),
+            patch("crawl_exams.verify_login", return_value=False) as verify_login,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertFalse(crawl_exams.login(session, "user", "pass"))
+
+        self.assertEqual(2, verify_login.call_count)
+
 
 if __name__ == "__main__":
     unittest.main()
