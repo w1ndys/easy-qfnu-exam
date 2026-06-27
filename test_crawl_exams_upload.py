@@ -13,6 +13,29 @@ import crawl_exams
 
 
 class CrawlUploadSafetyTest(unittest.TestCase):
+    def test_encode_credentials_inserts_scode_by_sxh_for_first_20_chars(self):
+        encoded = crawl_exams.encode_credentials(
+            "user",
+            "pass",
+            "abcdefghijklmnopqrstuvwxyz",
+            "12345678901234567890",
+        )
+
+        self.assertEqual(
+            "uasbcedefrghij%klmno%pqrstu%vwxyzpass",
+            encoded,
+        )
+
+    def test_encode_credentials_appends_text_after_20_chars_unchanged(self):
+        encoded = crawl_exams.encode_credentials(
+            "abcdefghijklmnopqrstu",
+            "pw",
+            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+            "11111111111111111111",
+        )
+
+        self.assertTrue(encoded.endswith("u%%%pw"))
+
     def test_upload_payload_handles_request_errors_without_secret(self):
         out = io.StringIO()
         with patch(

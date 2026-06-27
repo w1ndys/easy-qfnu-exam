@@ -26,6 +26,10 @@ BASE_URL = "http://zhjw.qfnu.edu.cn"
 QUERY_FORM_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_query"
 QUERY_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_query2"
 DETAIL_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_jszyqk"
+CAPTCHA_URL = f"{BASE_URL}/verifycode.servlet"
+LOGIN_SESS_URL = f"{BASE_URL}/Logon.do?method=logon&flag=sess"
+LOGIN_URL = f"{BASE_URL}/Logon.do?method=logonLdap"
+MAIN_PAGE_URL = f"{BASE_URL}/framework/main.jsp"
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -102,6 +106,25 @@ def record_to_json(rec):
         "invigilator": rec.invigilator,
         "week": rec.week_range,
     }
+
+
+def encode_credentials(username, password, scode, sxh):
+    code = f"{username}%%%{password}"
+    encoded = []
+    scode_index = 0
+
+    for index, char in enumerate(code):
+        if index >= 20:
+            encoded.append(code[index:])
+            break
+
+        encoded.append(char)
+        if index < len(sxh) and sxh[index].isdigit():
+            count = int(sxh[index])
+            encoded.append(scode[scode_index : scode_index + count])
+            scode_index += count
+
+    return "".join(encoded)
 
 
 def upload_payload(upload_url, upload_secret, payload):
