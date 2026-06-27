@@ -127,6 +127,60 @@ def encode_credentials(username, password, scode, sxh):
     return "".join(encoded)
 
 
+def fetch_captcha(session):
+    try:
+        resp = session.get(CAPTCHA_URL, timeout=30)
+    except requests.RequestException as e:
+        print(f"[!] 获取验证码失败: {e}")
+        return b""
+
+    if resp.status_code >= 400 or not resp.content:
+        print("[!] 获取验证码失败: 响应为空或状态异常")
+        return b""
+    return resp.content
+
+
+def solve_captcha(image_bytes):
+    try:
+        import ddddocr
+    except Exception:
+        print("[!] 缺少 ddddocr，请先执行 uv sync")
+        return ""
+
+    try:
+        ocr = ddddocr.DdddOcr(show_ad=False)
+        result = ocr.classification(image_bytes)
+    except Exception as e:
+        print(f"[!] 验证码识别失败: {e}")
+        return ""
+
+    return re.sub(r"\s+", "", str(result or ""))
+
+
+def fetch_login_sess(session):
+    try:
+        resp = session.post(
+            LOGIN_SESS_URL,
+            data={},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        print(f"[!] 获取登录参数失败: {e}")
+        return "", ""
+
+    text = resp.text.strip()
+    if not text or text.lower() == "no" or "#" not in text:
+        print("[!] 获取登录参数失败: 响应格式异常")
+        return "", ""
+
+    scode, sxh = text.split("#", 1)
+    if not scode or not sxh:
+        print("[!] 获取登录参数失败: scode/sxh 为空")
+        return "", ""
+    return scode, sxh
+
+
 def upload_payload(upload_url, upload_secret, payload):
     headers = {
         "Authorization": f"Bearer {upload_secret}",

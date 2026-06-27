@@ -209,6 +209,51 @@ class CrawlUploadSafetyTest(unittest.TestCase):
         self.assertEqual(0, status)
         self.assertEqual("JSESSIONID=env", crawl.call_args.args[0].cookie)
 
+    def test_solve_captcha_strips_ocr_whitespace(self):
+        fake_ocr = Mock()
+        fake_ocr.classification.return_value = " a b c d \n"
+
+        with patch.dict(
+            "sys.modules", {"ddddocr": SimpleNamespace(DdddOcr=Mock(return_value=fake_ocr))}
+        ):
+            self.assertEqual("abcd", crawl_exams.solve_captcha(b"image-bytes"))
+
+    def test_solve_captcha_returns_empty_when_ocr_dependency_missing(self):
+        with patch.dict("sys.modules", {"ddddocr": None}):
+            self.assertEqual("", crawl_exams.solve_captcha(b"image-bytes"))
+
+    def test_fetch_captcha_returns_response_bytes(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200, content=b"captcha")
+
+        self.assertEqual(b"captcha", crawl_exams.fetch_captcha(session))
+        session.get.assert_called_once_with(crawl_exams.CAPTCHA_URL, timeout=30)
+
+    def test_fetch_captcha_rejects_empty_body(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200, content=b"")
+
+        self.assertEqual(b"", crawl_exams.fetch_captcha(session))
+
+    def test_fetch_login_sess_parses_scode_and_sxh(self):
+        session = Mock()
+        session.post.return_value = SimpleNamespace(text="scode-value#12345")
+
+        self.assertEqual(("scode-value", "12345"), crawl_exams.fetch_login_sess(session))
+        session.post.assert_called_once_with(
+            crawl_exams.LOGIN_SESS_URL,
+            data={},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+
+    def test_fetch_login_sess_rejects_invalid_responses(self):
+        for body in ["", "no", "missing-separator"]:
+            session = Mock()
+            session.post.return_value = SimpleNamespace(text=body)
+
+            self.assertEqual(("", ""), crawl_exams.fetch_login_sess(session))
+
 
 if __name__ == "__main__":
     unittest.main()
