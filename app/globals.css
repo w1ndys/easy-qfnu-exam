@@ -130,3 +130,96 @@ select {
     width: 100%;
   }
 }
+
+@media (max-width: 640px) {
+  .page-shell {
+    padding: 24px 0;
+    width: calc(100% - 24px);
+  }
+
+  .hero {
+    padding: 24px;
+    border-radius: 20px;
+  }
+
+  .hero h1 {
+    font-size: clamp(24px, 7vw, 36px);
+  }
+
+  .status-card {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .status-card span {
+    font-size: 14px;
+  }
+
+  .search-panel {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .result-list {
+    grid-template-columns: 1fr;
+  }
+
+  .result-card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .result-card h2 {
+    font-size: 16px;
+  }
+}
+
+/* -------- notice section -------- */
+
+.notice-section {
+  margin-top: 32px;
+  padding: 24px;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 10px 30px rgba(23, 32, 51, 0.06);
+  font-size: 15px;
+  line-height: 1.7;
+  color: #5f6b85;
+  text-align: center;
+}
+
+.notice-section p {
+  margin: 8px 0;
+}
+
+.notice-tech {
+  font-weight: 700;
+  color: #174ea6;
+}
+
+.notice-disclaimer {
+  font-size: 14px;
+  color: #8b91a5;
+}
+
+.notice-tip {
+  font-size: 14px;
+  color: #8b91a5;
+}
+
+.notice-tip strong {
+  color: #d9534f;
+}
+
+@media (max-width: 640px) {
+  .notice-section {
+    padding: 16px;
+    border-radius: 16px;
+    font-size: 14px;
+  }
+
+  .notice-disclaimer,
+  .notice-tip {
+    font-size: 13px;
+  }
+}

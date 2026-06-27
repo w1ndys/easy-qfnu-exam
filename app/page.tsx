@@ -184,6 +184,18 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+
+      <section className="notice-section">
+        <p className="notice-tech">
+          📱 微信公众号「<strong>曲奇味卷卷</strong>」提供技术支持
+        </p>
+        <p className="notice-disclaimer">
+          ⚠️ 我不敢保证是准的，但一定保证是从教务系统某个地方查到的，数据仅供参考，后续可能会有变化。
+        </p>
+        <p className="notice-tip">
+          💡 本网站可以查到但教务系统里没有的原因是：<strong>已排考，未开放</strong>
+        </p>
+      </section>
     </main>
   )
 }
