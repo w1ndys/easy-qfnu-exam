@@ -254,6 +254,55 @@ class CrawlUploadSafetyTest(unittest.TestCase):
 
             self.assertEqual(("", ""), crawl_exams.fetch_login_sess(session))
 
+    def test_submit_login_posts_encoded_credentials(self):
+        session = Mock()
+        session.post.return_value = SimpleNamespace(text="正在登录")
+
+        result = crawl_exams.submit_login(session, "u", "p", "abcd", "scode", "11111")
+
+        self.assertEqual(crawl_exams.LOGIN_SUCCESS, result)
+        called_url = session.post.call_args.args[0]
+        called_kwargs = session.post.call_args.kwargs
+        self.assertEqual(crawl_exams.LOGIN_URL, called_url)
+        self.assertEqual("", called_kwargs["data"]["userAccount"])
+        self.assertEqual("", called_kwargs["data"]["userPassword"])
+        self.assertEqual("abcd", called_kwargs["data"]["RANDOMCODE"])
+        self.assertEqual(
+            crawl_exams.encode_credentials("u", "p", "scode", "11111"),
+            called_kwargs["data"]["encoded"],
+        )
+
+    def test_submit_login_classifies_password_and_captcha_errors(self):
+        session = Mock()
+        session.post.return_value = SimpleNamespace(text="用户名或密码错误")
+        self.assertEqual(
+            crawl_exams.LOGIN_BAD_CREDENTIALS,
+            crawl_exams.submit_login(session, "u", "p", "abcd", "scode", "1"),
+        )
+
+        session.post.return_value = SimpleNamespace(text="验证码错误")
+        self.assertEqual(
+            crawl_exams.LOGIN_BAD_CAPTCHA,
+            crawl_exams.submit_login(session, "u", "p", "abcd", "scode", "1"),
+        )
+
+    def test_verify_login_rejects_redirects_and_accepts_main_page_marker(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=302, text="")
+        self.assertFalse(crawl_exams.verify_login(session))
+
+        session.get.return_value = SimpleNamespace(status_code=200, text="教学一体化服务平台")
+        self.assertTrue(crawl_exams.verify_login(session))
+        session.get.assert_called_with(
+            crawl_exams.MAIN_PAGE_URL, timeout=30, allow_redirects=False
+        )
+
+    def test_verify_login_rejects_unmarked_200_response(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200, text="login page")
+
+        self.assertFalse(crawl_exams.verify_login(session))
+
 
 if __name__ == "__main__":
     unittest.main()

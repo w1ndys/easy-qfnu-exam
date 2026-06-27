@@ -41,6 +41,11 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
 }
 
+LOGIN_SUCCESS = "success"
+LOGIN_BAD_CAPTCHA = "bad_captcha"
+LOGIN_BAD_CREDENTIALS = "bad_credentials"
+LOGIN_UNKNOWN_ERROR = "unknown_error"
+
 FIELDNAMES = [
     "classroom_name",
     "classroom_id",
@@ -179,6 +184,56 @@ def fetch_login_sess(session):
         print("[!] 获取登录参数失败: scode/sxh 为空")
         return "", ""
     return scode, sxh
+
+
+def submit_login(session, username, password, captcha, scode, sxh):
+    encoded = encode_credentials(username, password, scode, sxh)
+    data = {
+        "userAccount": "",
+        "userPassword": "",
+        "RANDOMCODE": captcha,
+        "encoded": encoded,
+    }
+
+    try:
+        resp = session.post(
+            LOGIN_URL,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        print(f"[!] 登录提交失败: {e}")
+        return LOGIN_UNKNOWN_ERROR
+
+    body = resp.text or ""
+    if any(
+        text in body
+        for text in ["密码错误", "用户名或密码错误", "用户名密码错误", "您提供的用户名或者密码有误"]
+    ):
+        return LOGIN_BAD_CREDENTIALS
+    if any(text in body for text in ["验证码错误", "验证码不正确"]):
+        return LOGIN_BAD_CAPTCHA
+    if not body.strip() or any(
+        text in body for text in ["正在登录", "location", "教学一体化服务平台"]
+    ):
+        return LOGIN_SUCCESS
+
+    print(f"[!] 登录失败: {re.sub(r'<[^>]+>', '', body).strip()[:120]}")
+    return LOGIN_UNKNOWN_ERROR
+
+
+def verify_login(session):
+    try:
+        resp = session.get(MAIN_PAGE_URL, timeout=30, allow_redirects=False)
+    except requests.RequestException as e:
+        print(f"[!] 登录状态验证失败: {e}")
+        return False
+
+    if resp.status_code in (301, 302) or resp.status_code != 200:
+        return False
+
+    return "教学一体化服务平台" in resp.text or "glyphicon-class" in resp.text
 
 
 def upload_payload(upload_url, upload_secret, payload):
