@@ -155,7 +155,7 @@ class CrawlUploadSafetyTest(unittest.TestCase):
             upload_payload.assert_called_once()
             self.assertEqual([], upload_payload.call_args.args[2]["records"])
 
-    def test_main_returns_1_without_cookie_or_cookie_env(self):
+    def test_main_returns_1_without_username_or_password_env(self):
         out = io.StringIO()
         with (
             patch("sys.argv", ["crawl_exams.py"]),
@@ -167,11 +167,12 @@ class CrawlUploadSafetyTest(unittest.TestCase):
 
         self.assertEqual(1, status)
         self.assertIn(
-            "[!] 缺少Cookie，请设置 QFNU_JW_COOKIE，或手动使用 -c 传入", out.getvalue()
+            "[!] 缺少教务账号或密码，请设置 QFNU_JW_USERNAME 和 QFNU_JW_PASSWORD",
+            out.getvalue(),
         )
         crawl.assert_not_called()
 
-    def test_help_recommends_cookie_env_examples(self):
+    def test_help_recommends_uv_and_username_password_env(self):
         out = io.StringIO()
         with (
             patch("sys.argv", ["crawl_exams.py", "--help"]),
@@ -182,32 +183,56 @@ class CrawlUploadSafetyTest(unittest.TestCase):
 
         help_text = out.getvalue()
         self.assertEqual(0, cm.exception.code)
-        self.assertIn('export QFNU_JW_COOKIE="JSESSIONID=xxx"', help_text)
-        self.assertIn("python crawl_exams.py --json-output exams.json", help_text)
+        self.assertIn("uv sync", help_text)
+        self.assertIn('export QFNU_JW_USERNAME="学号"', help_text)
+        self.assertIn('export QFNU_JW_PASSWORD="密码"', help_text)
         self.assertIn(
-            "python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20",
-            help_text,
+            "uv run python crawl_exams.py --upload --json-output exams.json", help_text
         )
-        self.assertIn(
-            "python crawl_exams.py --upload --json-output exams.json", help_text
-        )
-        self.assertIn(
-            "登录后的Cookie字符串 (不推荐命令行传入，优先使用环境变量)",
-            help_text,
-        )
-        self.assertNotIn('-c "xxx"', help_text)
+        self.assertNotIn("QFNU_JW_COOKIE", help_text)
+        self.assertNotIn("--cookie", help_text)
+        self.assertNotIn("--cookie-env", help_text)
 
-    def test_main_reads_cookie_from_default_env(self):
+    def test_main_logs_in_then_crawls_with_authenticated_session(self):
+        session = Mock()
         with (
             patch("sys.argv", ["crawl_exams.py"]),
-            patch.dict(os.environ, {"QFNU_JW_COOKIE": "JSESSIONID=env"}, clear=True),
+            patch.dict(
+                os.environ,
+                {"QFNU_JW_USERNAME": "user", "QFNU_JW_PASSWORD": "pass"},
+                clear=True,
+            ),
+            patch("crawl_exams.make_session", return_value=session) as make_session,
+            patch("crawl_exams.login", return_value=True) as login,
             patch("crawl_exams.crawl", return_value=0) as crawl,
             redirect_stdout(io.StringIO()),
         ):
             status = crawl_exams.main()
 
         self.assertEqual(0, status)
-        self.assertEqual("JSESSIONID=env", crawl.call_args.args[0].cookie)
+        make_session.assert_called_once_with()
+        login.assert_called_once_with(session, "user", "pass")
+        crawl.assert_called_once()
+        self.assertIs(crawl.call_args.args[1], session)
+
+    def test_main_returns_1_when_login_fails(self):
+        session = Mock()
+        with (
+            patch("sys.argv", ["crawl_exams.py"]),
+            patch.dict(
+                os.environ,
+                {"QFNU_JW_USERNAME": "user", "QFNU_JW_PASSWORD": "pass"},
+                clear=True,
+            ),
+            patch("crawl_exams.make_session", return_value=session),
+            patch("crawl_exams.login", return_value=False),
+            patch("crawl_exams.crawl") as crawl,
+            redirect_stdout(io.StringIO()),
+        ):
+            status = crawl_exams.main()
+
+        self.assertEqual(1, status)
+        crawl.assert_not_called()
 
     def test_solve_captcha_strips_ocr_whitespace(self):
         fake_ocr = Mock()

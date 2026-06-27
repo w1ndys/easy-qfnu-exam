@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 考试安排爬取脚本 - 并发版
-使用方法: 先设置 QFNU_JW_COOKIE 环境变量，再运行 python crawl_exams.py [-w 5] [-o exams.csv]
+使用方法: 先设置 QFNU_JW_USERNAME 和 QFNU_JW_PASSWORD 环境变量，
+再运行 uv run python crawl_exams.py [-w 5] [-o exams.csv]
 """
 
 import requests
@@ -401,7 +402,7 @@ class RateLimiter:
 _limiter = None  # 全局速率限制器
 
 
-def make_session(cookie_str):
+def make_session(cookie_str=""):
     session = requests.Session()
     session.headers.update(HEADERS)
     if cookie_str:
@@ -697,8 +698,9 @@ def build_payload(args, records):
     }
 
 
-def crawl(args):
-    session = make_session(args.cookie)
+def crawl(args, session=None):
+    if session is None:
+        session = make_session(getattr(args, "cookie", ""))
     xnxqh, start_zc, end_zc = args.semester, args.start_week, args.end_week
     start_xq, end_xq, jszt = args.start_xq, args.end_xq, args.jszt
 
@@ -800,7 +802,7 @@ def crawl(args):
 
         def get_thread_session():
             if not hasattr(thread_local, "session"):
-                thread_local.session = make_session(args.cookie)
+                thread_local.session = make_session(getattr(args, "cookie", ""))
             return thread_local.session
 
         def task_wrapper(task):
@@ -881,22 +883,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  export QFNU_JW_COOKIE="JSESSIONID=xxx"
-  python crawl_exams.py --json-output exams.json
-  python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20
-  python crawl_exams.py --upload --json-output exams.json
+  export QFNU_JW_USERNAME="学号"
+  export QFNU_JW_PASSWORD="密码"
+
+  uv sync
+  uv run python crawl_exams.py --upload --json-output exams.json
+  uv run python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20
+  uv run python crawl_exams.py -s 2025-2026-2 --start-week 19 --end-week 20 --verbose
         """,
-    )
-    parser.add_argument(
-        "--cookie",
-        "-c",
-        default="",
-        help="登录后的Cookie字符串 (不推荐命令行传入，优先使用环境变量)",
-    )
-    parser.add_argument(
-        "--cookie-env",
-        default="QFNU_JW_COOKIE",
-        help="Cookie环境变量名 (默认: QFNU_JW_COOKIE)",
     )
     parser.add_argument(
         "--semester", "-s", default="2025-2026-2", help="学年学期 (默认: 2025-2026-2)"
@@ -938,10 +932,10 @@ def main():
     )
 
     args = parser.parse_args()
-    if not args.cookie:
-        args.cookie = os.getenv(args.cookie_env, "")
-    if not args.cookie:
-        print("[!] 缺少Cookie，请设置 QFNU_JW_COOKIE，或手动使用 -c 传入")
+    username = os.getenv("QFNU_JW_USERNAME", "")
+    password = os.getenv("QFNU_JW_PASSWORD", "")
+    if not username or not password:
+        print("[!] 缺少教务账号或密码，请设置 QFNU_JW_USERNAME 和 QFNU_JW_PASSWORD")
         return 1
 
     print("=" * 60)
@@ -953,7 +947,11 @@ def main():
     )
     print()
 
-    return crawl(args)
+    session = make_session()
+    if not login(session, username, password):
+        return 1
+
+    return crawl(args, session)
 
 
 if __name__ == "__main__":
