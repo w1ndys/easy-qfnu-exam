@@ -16,7 +16,6 @@ import time
 import argparse
 import threading
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 禁用警告
 import urllib3
@@ -364,15 +363,67 @@ class ClassroomInfo:
         self.cells = []
 
 
+def progress_path_for(output_path):
+    return f"{output_path}.progress.json"
+
+
+def task_key(cinfo, gcell):
+    return "|".join(
+        [
+            getattr(cinfo, "jsbh", ""),
+            str(getattr(gcell, "weekday", "")),
+            getattr(gcell, "tdvalue", ""),
+            getattr(gcell, "kssj", ""),
+            getattr(gcell, "jssj", ""),
+        ]
+    )
+
+
+class ProgressStore:
+    def __init__(self, path):
+        self.path = path
+        self.completed = {}
+        self.records = []
+        self.load()
+
+    def load(self):
+        if not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[!] 读取断点文件失败，将重新开始: {e}")
+            return
+        self.completed = data.get("completed", {}) if isinstance(data, dict) else {}
+        self.records = data.get("records", []) if isinstance(data, dict) else []
+        print(
+            f"[+] 已加载断点: {len(self.completed)} 个单元格, "
+            f"{len(self.records)} 条记录"
+        )
+
+    def mark_done(self, key, status, records):
+        self.completed[key] = {"status": status, "records_count": len(records)}
+        self.records.extend(record_to_json(rec) for rec in records)
+        self.save()
+
+    def save(self):
+        tmp_path = f"{self.path}.tmp"
+        data = {"completed": self.completed, "records": self.records}
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, self.path)
+
+
 class ResultWriter:
     """线程安全的结果写入器，支持实时保存"""
 
-    def __init__(self, output_path, fmt="csv"):
+    def __init__(self, output_path, fmt="csv", initial_records=None):
         self.output_path = output_path
         self.fmt = fmt
         self.lock = threading.Lock()
         self.count = 0
-        self.json_records = []
+        self.json_records = list(initial_records or [])
         self._init_file()
 
     def _init_file(self):
@@ -380,9 +431,20 @@ class ResultWriter:
             with open(self.output_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
                 writer.writerow(FIELD_LABELS)
+                for rec in self.json_records:
+                    writer.writerow([rec.get(fn, "") for fn in FIELDNAMES])
+                    self.count += 1
         elif self.fmt == "json":
             with open(self.output_path, "w", encoding="utf-8") as f:
                 f.write("[\n")
+                for i, rec in enumerate(self.json_records):
+                    if i > 0:
+                        f.write(",\n")
+                    row = {
+                        label: rec.get(fn, "") for fn, label in zip(FIELDNAMES, FIELD_LABELS)
+                    }
+                    json.dump(row, f, ensure_ascii=False)
+                    self.count += 1
 
     def write(self, records):
         """追加写入记录"""
@@ -821,23 +883,25 @@ def crawl(args, session=None):
         f"[+] {len(classrooms)} 教室, {total_cells} 时间槽, "
         f"{len(exam_tasks)} 个考试标记"
     )
-    print(f"[*] 并发数: {args.workers}, 开始获取详情...")
+    print(f"[*] 顺序获取详情: {args.rate} req/s")
 
-    # 5. 并发获取详情 + 实时保存
-    writer = ResultWriter(args.output, args.format)
+    # 5. 顺序获取详情 + 实时保存
+    progress = ProgressStore(progress_path_for(args.output))
+    writer = ResultWriter(args.output, args.format, progress.records)
 
     stats = {
         "lock": threading.Lock(),
-        "ok": 0,  # 有记录的单元格
-        "empty": 0,  # 有考试标记但详情无记录
+        "ok": sum(1 for item in progress.completed.values() if item.get("status") == "ok"),
+        "empty": sum(
+            1 for item in progress.completed.values() if item.get("status") == "empty"
+        ),
         "fail": 0,  # HTTP请求失败
-        "records": 0,  # 总记录数
+        "records": len(progress.records),  # 总记录数
     }
 
     if not exam_tasks:
         print("[!] 没有找到考试安排，将同步空数据集")
     else:
-        # 设置全局速率限制
         global _limiter
         _limiter = RateLimiter(args.rate)
 
@@ -846,44 +910,11 @@ def crawl(args, session=None):
             for i, (cinfo, gcell) in enumerate(exam_tasks, 1)
         ]
 
-        # 线程本地 session
-        thread_local = threading.local()
-
-        def get_thread_session():
-            if not hasattr(thread_local, "session"):
-                thread_local.session = make_session(getattr(args, "cookie", ""))
-            return thread_local.session
-
-        def task_wrapper(task):
-            session = get_thread_session()
-            return process_task(
-                task,
-                session,
-                xnxqh,
-                start_zc,
-                end_zc,
-                start_xq,
-                end_xq,
-                jszt,
-                kbjcmsid,
-                writer,
-                stats,
-                args.verbose,
-            )
-
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = {executor.submit(task_wrapper, t): t for t in tasks}
-
-            for f in as_completed(futures):
-                task = futures[f]
-                idx = task[0]
-                try:
-                    f.result()
-                except Exception as e:
-                    with stats["lock"]:
-                        stats["fail"] += 1
-                    print(f"  [!] 任务 {idx} 异常: {e}")
-
+        for task in tasks:
+            idx = task[0]
+            _, _, cinfo, gcell = task
+            key = task_key(cinfo, gcell)
+            if key in progress.completed:
                 if not args.verbose:
                     done = stats["ok"] + stats["empty"] + stats["fail"]
                     if done % 100 == 0 or done == len(exam_tasks):
@@ -893,12 +924,48 @@ def crawl(args, session=None):
                             f"成功={stats['ok']}, 空={stats['empty']}, "
                             f"失败={stats['fail']}, 记录={stats['records']}"
                         )
+                continue
+
+            try:
+                _, records_count, status, err_msg, records = process_task(
+                    task,
+                    session,
+                    xnxqh,
+                    start_zc,
+                    end_zc,
+                    start_xq,
+                    end_xq,
+                    jszt,
+                    kbjcmsid,
+                    writer,
+                    stats,
+                    args.verbose,
+                )
+                if status == 200 and err_msg in ("", "empty"):
+                    progress.mark_done(key, "ok" if records_count else "empty", records)
+            except Exception as e:
+                with stats["lock"]:
+                    stats["fail"] += 1
+                print(f"  [!] 任务 {idx} 异常: {e}")
+
+            if not args.verbose:
+                done = stats["ok"] + stats["empty"] + stats["fail"]
+                if done % 100 == 0 or done == len(exam_tasks):
+                    print(
+                        f"  进度: {done}/{len(exam_tasks)} "
+                        f"({done * 100 // len(exam_tasks)}%), "
+                        f"成功={stats['ok']}, 空={stats['empty']}, "
+                        f"失败={stats['fail']}, 记录={stats['records']}"
+                    )
 
     writer.finalize()
     if stats["fail"] > 0:
         print(
             f"[!] 存在 {stats['fail']} 个失败任务，跳过JSON输出和上传，避免发布不完整数据"
         )
+        return 1
+    if exam_tasks and stats["records"] == 0:
+        print("[!] 已发现考试标记但详情记录为0，跳过JSON输出和上传，避免发布空数据")
         return 1
 
     payload = build_payload(args, writer.get_json_records())
@@ -916,6 +983,11 @@ def crawl(args, session=None):
             return 1
         if not upload_payload(upload_url, upload_secret, payload):
             return 1
+
+    progress_file = progress_path_for(args.output)
+    if os.path.exists(progress_file):
+        os.remove(progress_file)
+        print(f"[+] 已清理断点文件: {progress_file}")
 
     print(
         f"\n[+] 完成! 单元格: {stats['ok']}+{stats['empty']}+{stats['fail']} "
