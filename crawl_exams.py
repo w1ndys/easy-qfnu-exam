@@ -1000,7 +1000,7 @@ def crawl(args, session=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="曲阜师范大学教务系统 - 考试安排爬取脚本 (并发版)",
+        description="曲阜师范大学教务系统 - 考试安排爬取脚本 (顺序版)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -1038,10 +1038,10 @@ def main():
         help="输出格式 (默认: csv)",
     )
     parser.add_argument(
-        "--workers", "-w", type=int, default=5, help="并发线程数 (默认: 5, 建议 3-10)"
+        "--workers", "-w", type=int, default=1, help="已停用: 当前固定顺序执行"
     )
     parser.add_argument(
-        "--rate", "-r", type=float, default=10.0, help="每秒最大请求数 (默认: 10)"
+        "--rate", "-r", type=float, default=2.0, help="每秒最大请求数 (默认: 2，即0.5秒1个)"
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="显示每条记录详情")
     parser.add_argument("--json-output", default="", help="输出JSON上传载荷路径 (可选)")
@@ -1060,11 +1060,11 @@ def main():
         return 1
 
     print("=" * 60)
-    print("曲阜师范大学教务系统 - 考试安排爬取 (并发版)")
+    print("曲阜师范大学教务系统 - 考试安排爬取 (顺序版)")
     print("=" * 60)
     print(f"学期: {args.semester}, 周次: {args.start_week}-{args.end_week}")
     print(
-        f"并发: {args.workers} 线程, 速率: {args.rate} req/s, 输出: {args.output} ({args.format})"
+        f"模式: 顺序执行, 速率: {args.rate} req/s, 输出: {args.output} ({args.format})"
     )
     print()
 
