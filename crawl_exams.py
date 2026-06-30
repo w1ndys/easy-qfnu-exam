@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-考试安排爬取脚本 - 并发版
+考试安排爬取脚本 - 顺序版
 使用方法: 先设置 QFNU_JW_USERNAME 和 QFNU_JW_PASSWORD 环境变量，
-再运行 uv run python crawl_exams.py [-w 5] [-o exams.csv]
+再运行 uv run python crawl_exams.py [-o exams.csv]
 """
 
 import requests
+import builtins
 import os
 import re
 import csv
@@ -23,6 +24,11 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+def print(*args, **kwargs):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    builtins.print(f"[{timestamp}]", *args, **kwargs)
+
+
 BASE_URL = "http://zhjw.qfnu.edu.cn"
 QUERY_FORM_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_query"
 QUERY_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_query2"
@@ -30,7 +36,7 @@ DETAIL_URL = f"{BASE_URL}/jsxsd/kbxx/jsjy_jszyqk"
 CAPTCHA_URL = f"{BASE_URL}/verifycode.servlet"
 LOGIN_SESS_URL = f"{BASE_URL}/Logon.do?method=logon&flag=sess"
 LOGIN_URL = f"{BASE_URL}/Logon.do?method=logonLdap"
-MAIN_PAGE_URL = f"{BASE_URL}/framework/main.jsp"
+MAIN_PAGE_URL = f"{BASE_URL}/jsxsd/framework/jsMain.jsp"
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -234,9 +240,44 @@ def verify_login(session):
         return False
 
     if resp.status_code in (301, 302) or resp.status_code != 200:
+        location = resp.headers.get("Location", "") if hasattr(resp, "headers") else ""
+        suffix = f", Location: {location}" if location else ""
+        print(f"[!] 登录状态验证失败: HTTP {resp.status_code}{suffix}")
         return False
 
-    return "教学一体化服务平台" in resp.text or "glyphicon-class" in resp.text
+    body = resp.text or ""
+    success_markers = [
+        "教学一体化服务平台",
+        "glyphicon-class",
+        "framework/main",
+        "jsMain",
+        "kbjcmsid",
+        "jsjy_query",
+        "教室借用",
+        "考试",
+        "退出",
+        "注销",
+    ]
+    login_form_markers = [
+        'name="userAccount"',
+        'id="userAccount"',
+        'name="userPassword"',
+        'id="userPassword"',
+        'name="RANDOMCODE"',
+    ]
+    if any(marker in body for marker in success_markers) and not any(
+        marker in body for marker in login_form_markers
+    ):
+        return True
+
+    title = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+    if title:
+        summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", title.group(1))).strip()
+    else:
+        summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", body)).strip()[:120]
+    if summary:
+        print(f"[!] 登录状态验证失败: 未识别的页面: {summary[:120]}")
+    return False
 
 
 def login(session, username, password):
@@ -655,38 +696,46 @@ def process_task(
     )
 
     if status == 200:
+        if is_login_page(html):
+            with stats["lock"]:
+                stats["fail"] += 1
+            print(
+                f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+                f"{gcell.kssj}-{gcell.jssj} -> 登录已失效"
+            )
+            return idx, 0, 200, "login page", []
+
         records = parse_detail_html(html, cinfo, gcell)
         if records:
             writer.write(records)
             with stats["lock"]:
                 stats["ok"] += 1
                 stats["records"] += len(records)
-            if verbose:
-                for r in records:
-                    print(
-                        f"  [{stats['records']}] {r.course_name or '?'} | "
-                        f"{r.exam_date or r.week_info} | {r.classroom_name or cinfo.name}"
-                    )
-            return idx, len(records), 200, ""
+            courses = ", ".join(r.course_name or "?" for r in records[:3])
+            if len(records) > 3:
+                courses += f" 等{len(records)}条"
+            print(
+                f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+                f"{gcell.kssj}-{gcell.jssj} -> {len(records)} 条: {courses}"
+            )
+            return idx, len(records), 200, "", records
         else:
             with stats["lock"]:
                 stats["empty"] += 1
-            if verbose:
-                print(
-                    f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
-                    f"{gcell.kssj}-{gcell.jssj} -> 无记录"
-                )
-            return idx, 0, 200, "empty"
+            print(
+                f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+                f"{gcell.kssj}-{gcell.jssj} -> 无记录"
+            )
+            return idx, 0, 200, "empty", []
     else:
         with stats["lock"]:
             stats["fail"] += 1
         err_msg = html if isinstance(html, str) else str(status)
-        if verbose:
-            print(
-                f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
-                f"{gcell.kssj}-{gcell.jssj} -> HTTP {status} {err_msg[:80]}"
-            )
-        return idx, 0, status, err_msg
+        print(
+            f"  [{idx}/{total}] {cinfo.name} 星期{gcell.weekday} "
+            f"{gcell.kssj}-{gcell.jssj} -> HTTP {status} {err_msg[:80]}"
+        )
+        return idx, 0, status, err_msg, []
 
 
 def build_payload(args, records):
